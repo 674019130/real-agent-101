@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useParams } from "next/navigation";
 import { motion } from "framer-motion";
 import {
@@ -9,12 +10,15 @@ import {
   GitCompareArrows,
   Lightbulb,
   ArrowLeft,
+  Code2,
+  Zap,
 } from "lucide-react";
 import Link from "next/link";
 import Header from "@/components/layout/Header";
 import Sidebar from "@/components/layout/Sidebar";
+import AgentAnatomy from "@/components/AgentAnatomy";
 import QuestionCard from "@/components/lesson/QuestionCard";
-import { getLessonById, lessons } from "@/data/lessons";
+import { getLessonById, lessons, type ContentItem } from "@/data/lessons";
 
 const sectionIcons: Record<string, React.ReactNode> = {
   student: <User size={14} />,
@@ -22,6 +26,7 @@ const sectionIcons: Record<string, React.ReactNode> = {
   output: <FileCode2 size={14} />,
   comparison: <GitCompareArrows size={14} />,
   insight: <Lightbulb size={14} />,
+  code: <Code2 size={14} />,
 };
 
 const sectionLabels: Record<string, string> = {
@@ -30,11 +35,81 @@ const sectionLabels: Record<string, string> = {
   output: "产出",
   comparison: "对比",
   insight: "洞察",
+  code: "源码",
 };
+
+function ContentItemView({ item, accentColor, sectionType }: {
+  item: ContentItem;
+  accentColor: string;
+  sectionType: string;
+}) {
+  if (item.code) {
+    return (
+      <div className="my-3">
+        {item.text && (
+          <p className="text-sm leading-relaxed mb-2" style={{ color: "var(--color-text-secondary)" }}>
+            {item.text}
+          </p>
+        )}
+        <pre
+          className="rounded-lg p-4 text-[12px] leading-[1.65] overflow-x-auto font-mono"
+          style={{
+            background: "oklch(0.11 0.008 65)",
+            border: "1px solid var(--color-border-subtle)",
+            color: "var(--color-text-secondary)",
+          }}
+        >
+          <code>{item.code}</code>
+        </pre>
+      </div>
+    );
+  }
+
+  const isKey = item.key;
+  const isInsight = sectionType === "insight";
+
+  return (
+    <div
+      className="relative"
+      style={isKey ? {
+        background: "var(--color-amber-glow)",
+        borderLeft: `3px solid var(--color-amber)`,
+        borderRadius: "0 6px 6px 0",
+        padding: "8px 12px",
+        marginLeft: "-12px",
+        marginTop: "4px",
+        marginBottom: "4px",
+      } : {}}
+    >
+      <p
+        className="text-sm leading-relaxed"
+        style={{
+          color: isInsight || isKey ? "var(--color-text)" : "var(--color-text-secondary)",
+          fontWeight: isInsight || isKey ? 500 : 400,
+          paddingLeft: (sectionType === "teacher" || isInsight) && !isKey ? "12px" : "0",
+        }}
+      >
+        {!isInsight && !isKey && (
+          <span className="text-[var(--color-text-tertiary)] mr-2">›</span>
+        )}
+        {isKey && (
+          <span
+            className="inline-block text-[9px] font-bold px-1.5 py-0.5 rounded mr-2 uppercase tracking-wider align-middle"
+            style={{ background: "var(--color-amber)", color: "var(--color-bg)" }}
+          >
+            Key
+          </span>
+        )}
+        {item.text}
+      </p>
+    </div>
+  );
+}
 
 export default function LessonPage() {
   const { id } = useParams<{ id: string }>();
   const lesson = getLessonById(id);
+  const [streak, setStreak] = useState(0);
 
   if (!lesson) {
     return (
@@ -79,10 +154,7 @@ export default function LessonPage() {
             <div className="flex items-center gap-3 mb-4">
               <span
                 className="text-[10px] font-bold px-2.5 py-1 rounded-full"
-                style={{
-                  background: `${lesson.color}15`,
-                  color: lesson.color,
-                }}
+                style={{ background: `${lesson.color}15`, color: lesson.color }}
               >
                 L{String(lesson.number).padStart(2, "0")}
               </span>
@@ -106,9 +178,7 @@ export default function LessonPage() {
                 color: "var(--color-text-secondary)",
               }}
             >
-              <span className="font-medium" style={{ color: lesson.color }}>
-                目标
-              </span>
+              <span className="font-medium" style={{ color: lesson.color }}>目标</span>
               <span className="mx-2">—</span>
               {lesson.objective}
             </div>
@@ -121,24 +191,20 @@ export default function LessonPage() {
                 key={i}
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.15 + i * 0.06, duration: 0.35 }}
+                transition={{ delay: 0.1 + i * 0.04, duration: 0.35 }}
               >
                 <div className="flex items-center gap-2 mb-4">
                   <span
                     className="w-6 h-6 rounded flex items-center justify-center"
                     style={{
-                      background:
-                        section.type === "teacher"
-                          ? "var(--color-amber-glow)"
-                          : section.type === "insight"
-                            ? `${lesson.color}15`
-                            : "var(--color-bg-surface)",
-                      color:
-                        section.type === "teacher"
-                          ? "var(--color-amber)"
-                          : section.type === "insight"
-                            ? lesson.color
-                            : "var(--color-text-tertiary)",
+                      background: section.type === "teacher" ? "var(--color-amber-glow)"
+                        : section.type === "insight" ? `${lesson.color}15`
+                        : section.type === "code" ? "oklch(0.18 0.02 250 / 0.3)"
+                        : "var(--color-bg-surface)",
+                      color: section.type === "teacher" ? "var(--color-amber)"
+                        : section.type === "insight" ? lesson.color
+                        : section.type === "code" ? "var(--color-blue)"
+                        : "var(--color-text-tertiary)",
                     }}
                   >
                     {sectionIcons[section.type]}
@@ -154,36 +220,18 @@ export default function LessonPage() {
                 <div
                   className="space-y-2.5 pl-8"
                   style={
-                    section.type === "teacher"
-                      ? { borderLeft: "2px solid var(--color-amber-glow)" }
-                      : section.type === "insight"
-                        ? { borderLeft: `2px solid ${lesson.color}33` }
-                        : {}
+                    section.type === "teacher" ? { borderLeft: "2px solid var(--color-amber-glow)" }
+                    : section.type === "insight" ? { borderLeft: `2px solid ${lesson.color}33` }
+                    : {}
                   }
                 >
                   {section.items.map((item, j) => (
-                    <p
+                    <ContentItemView
                       key={j}
-                      className="text-sm leading-relaxed"
-                      style={{
-                        color:
-                          section.type === "insight"
-                            ? "var(--color-text)"
-                            : "var(--color-text-secondary)",
-                        paddingLeft:
-                          section.type === "teacher" || section.type === "insight"
-                            ? "12px"
-                            : "0",
-                        fontWeight: section.type === "insight" ? 500 : 400,
-                      }}
-                    >
-                      {section.type !== "insight" && (
-                        <span className="text-[var(--color-text-tertiary)] mr-2">
-                          ›
-                        </span>
-                      )}
-                      {item}
-                    </p>
+                      item={item}
+                      accentColor={lesson.color}
+                      sectionType={section.type}
+                    />
                   ))}
                 </div>
               </motion.section>
@@ -194,16 +242,23 @@ export default function LessonPage() {
           <motion.section
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            transition={{ delay: 0.5, duration: 0.4 }}
+            transition={{ delay: 0.4, duration: 0.4 }}
           >
             <div className="flex items-center gap-2 mb-6">
               <span className="text-[var(--color-amber)]">
                 <Lightbulb size={16} />
               </span>
               <h2 className="text-lg font-semibold">思考题</h2>
+              {streak > 0 && (
+                <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full"
+                  style={{ background: "var(--color-amber-glow)", color: "var(--color-amber)" }}>
+                  <Zap size={10} />
+                  {streak} 题已答
+                </span>
+              )}
             </div>
 
-            <div className="space-y-8">
+            <div className="space-y-5">
               {lesson.questions.map((q, i) => (
                 <QuestionCard
                   key={q.id}
@@ -211,36 +266,32 @@ export default function LessonPage() {
                   index={i}
                   lessonId={lesson.id}
                   accentColor={lesson.color}
+                  onAttempt={() => setStreak(s => s + 1)}
                 />
               ))}
             </div>
           </motion.section>
 
-          {/* Prev/Next navigation */}
+          {/* Prev/Next */}
           <div className="flex items-center justify-between mt-16 pt-8 border-t border-[var(--color-border-subtle)]">
             {prev ? (
-              <Link
-                href={`/lessons/${prev.id}`}
-                className="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] transition-colors"
-              >
+              <Link href={`/lessons/${prev.id}`}
+                className="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] transition-colors">
                 ← L{String(prev.number).padStart(2, "0")} {prev.title}
               </Link>
-            ) : (
-              <div />
-            )}
+            ) : <div />}
             {next ? (
-              <Link
-                href={`/lessons/${next.id}`}
-                className="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] transition-colors"
-              >
+              <Link href={`/lessons/${next.id}`}
+                className="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] transition-colors">
                 L{String(next.number).padStart(2, "0")} {next.title} →
               </Link>
-            ) : (
-              <div />
-            )}
+            ) : <div />}
           </div>
         </main>
       </div>
+
+      {/* Floating Agent Anatomy */}
+      <AgentAnatomy />
     </>
   );
 }
