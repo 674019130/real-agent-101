@@ -11,10 +11,39 @@ export interface ContentItem {
   code?: string;
 }
 
+export interface SeqStep {
+  from: string;
+  to: string;
+  label: string;
+  note?: string;
+  dashed?: boolean;
+}
+
+export interface TableRow {
+  cells: string[];
+  highlight?: boolean;
+}
+
+export interface FlowStep {
+  label: string;
+  detail?: string;
+  type?: "start" | "end" | "decision" | "process";
+}
+
 export interface ContentSection {
-  type: "student" | "teacher" | "output" | "comparison" | "insight" | "code";
+  type: "student" | "teacher" | "output" | "comparison" | "insight" | "code" | "sequence" | "table" | "flow";
   title: string;
   items: ContentItem[];
+  // For sequence diagrams
+  actors?: string[];
+  steps?: SeqStep[];
+  // For tables
+  headers?: string[];
+  rows?: TableRow[];
+  caption?: string;
+  // For flow diagrams
+  flowSteps?: FlowStep[];
+  flowDirection?: "vertical" | "horizontal";
 }
 
 export interface Lesson {
@@ -69,6 +98,22 @@ export const lessons: Lesson[] = [
           t("messages 是一个 list[dict]，整个 agent 的核心状态都围绕这个列表", true),
           t("每轮循环：用户输入 append 进去，assistant 回复 append 进去，工具结果 append 进去"),
         ],
+      },
+      {
+        type: "flow",
+        title: "Agent Loop 流程",
+        items: [],
+        flowSteps: [
+          { label: "用户输入", type: "start" },
+          { label: "构建 messages", detail: "append user msg" },
+          { label: "压缩检查", type: "decision", detail: "> 80% 就压缩" },
+          { label: "调 API (stream)", detail: "SSE 流式" },
+          { label: "收集响应", detail: "text + tool_calls" },
+          { label: "finish_reason?", type: "decision" },
+          { label: "tool_calls → 执行工具", detail: "→ 回到压缩检查" },
+          { label: "stop → 输出", type: "end" },
+        ],
+        flowDirection: "vertical",
       },
       {
         type: "student",
@@ -276,6 +321,20 @@ export const lessons: Lesson[] = [
         ],
       },
       {
+        type: "table",
+        title: "三种 Agent 运行环境对比",
+        items: [],
+        headers: ["", "Local Agent", "Cloud Agent", "Hybrid Agent"],
+        rows: [
+          { cells: ["信任模型", "信任用户", "不信任代码", "混合"], highlight: true },
+          { cells: ["沙盒", "权限系统（软）", "microVM/容器（硬）", "云端硬 + 本地软"] },
+          { cells: ["文件系统", "本地直接访问", "云端 overlay FS", "SSH/tunnel 访问"] },
+          { cells: ["工具调用", "本地进程", "沙盒内执行", "远程转发"] },
+          { cells: ["状态", "本地文件", "需要持久化", "两端同步"] },
+          { cells: ["代表", "Claude Code", "Manus, Devin", "CC Remote"] },
+        ],
+      },
+      {
         type: "student",
         title: "Local Agent 的核心特征",
         items: [
@@ -358,6 +417,19 @@ export const lessons: Lesson[] = [
           t("File Edit — old_string → new_string 精确替换。必须唯一匹配，0 次匹配返回「没找到」，多次匹配返回「请更精确」"),
           t("File Write — 整文件覆盖/创建新文件，自动创建父目录。和 Edit 是两个不同的工具"),
           t("Todo List — add/update/list，JSON 文件持久化，状态：pending/in_progress/done/cancelled"),
+        ],
+      },
+      {
+        type: "table",
+        title: "File Write vs File Edit",
+        items: [],
+        headers: ["", "File Write", "File Edit"],
+        rows: [
+          { cells: ["语义", "整文件覆盖/创建", "精确替换某段"], highlight: true },
+          { cells: ["输入", "file_path + content（全文）", "file_path + old_string + new_string"] },
+          { cells: ["风险", "高（覆盖整个文件）", "低（只改匹配部分）"] },
+          { cells: ["幂等性", "否（重复写入相同）", "是（第二次匹配不到报错）"] },
+          { cells: ["用途", "新文件、全量重写", "改一行代码、修一个配置"] },
         ],
       },
       {
@@ -526,6 +598,25 @@ new_content = content.replace(old_string, new_string, 1)`),
           t("Step 8 执行工具 (main.py:212) — registry.dispatch() → tool.execute(**params) → 返回结果字符串"),
           t("Step 9 结果回传 (main.py:219) — tool_call_id 关联（必须匹配，否则 API 报错）→ append tool msg"),
           t("Step 10 循环 (main.py:226) — continue → 回 Step 2，模型看到工具结果后继续调工具或给出最终回答"),
+        ],
+      },
+      {
+        type: "sequence",
+        title: "请求时序图：用户 → Agent → API → 工具",
+        items: [],
+        actors: ["user", "loop", "api", "tools"],
+        steps: [
+          { from: "user", to: "loop", label: "输入文本" },
+          { from: "loop", to: "loop", label: "压缩检查", note: "token > 80%?" },
+          { from: "loop", to: "api", label: "stream_response()" },
+          { from: "api", to: "loop", label: "SSE chunks", dashed: true },
+          { from: "loop", to: "loop", label: "收集 text + tool_calls" },
+          { from: "loop", to: "loop", label: "finish_reason?", note: "分支判断" },
+          { from: "loop", to: "tools", label: "dispatch(name, params)" },
+          { from: "tools", to: "loop", label: "result string", dashed: true },
+          { from: "loop", to: "api", label: "再次 stream (带工具结果)" },
+          { from: "api", to: "loop", label: "最终回答", dashed: true },
+          { from: "loop", to: "user", label: "输出文本" },
         ],
       },
       {

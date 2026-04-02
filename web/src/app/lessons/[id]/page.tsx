@@ -12,12 +12,18 @@ import {
   ArrowLeft,
   Code2,
   Zap,
+  ArrowDownUp,
+  Table2,
+  Workflow,
 } from "lucide-react";
 import Link from "next/link";
 import Header from "@/components/layout/Header";
 import Sidebar from "@/components/layout/Sidebar";
 import AgentAnatomy from "@/components/AgentAnatomy";
 import QuestionCard from "@/components/lesson/QuestionCard";
+import SequenceDiagram from "@/components/lesson/SequenceDiagram";
+import CompareTable from "@/components/lesson/CompareTable";
+import FlowDiagram from "@/components/lesson/FlowDiagram";
 import { getLessonById, lessons, type ContentItem } from "@/data/lessons";
 
 const sectionIcons: Record<string, React.ReactNode> = {
@@ -27,6 +33,9 @@ const sectionIcons: Record<string, React.ReactNode> = {
   comparison: <GitCompareArrows size={14} />,
   insight: <Lightbulb size={14} />,
   code: <Code2 size={14} />,
+  sequence: <ArrowDownUp size={14} />,
+  table: <Table2 size={14} />,
+  flow: <Workflow size={14} />,
 };
 
 const sectionLabels: Record<string, string> = {
@@ -36,6 +45,9 @@ const sectionLabels: Record<string, string> = {
   comparison: "对比",
   insight: "洞察",
   code: "源码",
+  sequence: "时序",
+  table: "对比",
+  flow: "流程",
 };
 
 function ContentItemView({ item, accentColor, sectionType }: {
@@ -217,23 +229,43 @@ export default function LessonPage() {
                   </span>
                 </div>
 
-                <div
-                  className="space-y-2.5 pl-8"
-                  style={
-                    section.type === "teacher" ? { borderLeft: "2px solid var(--color-amber-glow)" }
-                    : section.type === "insight" ? { borderLeft: `2px solid ${lesson.color}33` }
-                    : {}
-                  }
-                >
-                  {section.items.map((item, j) => (
-                    <ContentItemView
-                      key={j}
-                      item={item}
-                      accentColor={lesson.color}
-                      sectionType={section.type}
-                    />
-                  ))}
-                </div>
+                {/* Diagram sections */}
+                {section.type === "sequence" && section.actors && section.steps && (
+                  <div className="pl-8">
+                    <SequenceDiagram actors={section.actors} steps={section.steps} accentColor={lesson.color} />
+                  </div>
+                )}
+                {section.type === "table" && section.headers && section.rows && (
+                  <div className="pl-8">
+                    <CompareTable headers={section.headers} rows={section.rows} accentColor={lesson.color} caption={section.caption} />
+                  </div>
+                )}
+                {section.type === "flow" && section.flowSteps && (
+                  <div className="pl-8">
+                    <FlowDiagram steps={section.flowSteps} accentColor={lesson.color} direction={section.flowDirection} />
+                  </div>
+                )}
+
+                {/* Text content sections */}
+                {section.type !== "sequence" && section.type !== "table" && section.type !== "flow" && (
+                  <div
+                    className="space-y-2.5 pl-8"
+                    style={
+                      section.type === "teacher" ? { borderLeft: "2px solid var(--color-amber-glow)" }
+                      : section.type === "insight" ? { borderLeft: `2px solid ${lesson.color}33` }
+                      : {}
+                    }
+                  >
+                    {section.items.map((item, j) => (
+                      <ContentItemView
+                        key={j}
+                        item={item}
+                        accentColor={lesson.color}
+                        sectionType={section.type}
+                      />
+                    ))}
+                  </div>
+                )}
               </motion.section>
             ))}
           </div>
