@@ -51,7 +51,7 @@ const lessonColors: Record<string, string> = {
 export default function AgentAnatomy() {
   const pathname = usePathname();
   const router = useRouter();
-  const [hovered, setHovered] = useState(false);
+  const [hovered, setHovered] = useState(true);
   const [hoveredOrgan, setHoveredOrgan] = useState<string | null>(null);
 
   // Extract current lesson from pathname
