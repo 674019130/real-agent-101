@@ -3,6 +3,8 @@
 import os
 
 from src.types import Tool
+from src.permissions.types import PermissionLevel
+from src.permissions.path_check import is_within_project, is_bypass_immune
 
 
 class FileWriteTool(Tool):
@@ -39,6 +41,14 @@ class FileWriteTool(Tool):
     @property
     def is_concurrent_safe(self) -> bool:
         return False  # modifies files
+
+    def check_permission(self, file_path: str = "", **_) -> tuple[PermissionLevel, bool]:
+        """Write: ASK within project, DENY outside or bypass-immune paths."""
+        if is_bypass_immune(file_path):
+            return PermissionLevel.DENY, True
+        if not is_within_project(file_path, os.getcwd()):
+            return PermissionLevel.DENY, False
+        return PermissionLevel.ASK, False
 
     async def execute(self, file_path: str = "", content: str = "", **_) -> str:
         if not file_path:

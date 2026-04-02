@@ -5,6 +5,7 @@ import os
 from dataclasses import dataclass, field, asdict
 
 from src.types import Tool
+from src.permissions.types import PermissionLevel
 
 
 @dataclass
@@ -119,6 +120,12 @@ class TodoTool(Tool):
     @property
     def is_concurrent_safe(self) -> bool:
         return False  # modifies state
+
+    def check_permission(self, action: str = "", **_) -> tuple[PermissionLevel, bool]:
+        """Todo: list is AUTO, add/update are ASK."""
+        if action == "list":
+            return PermissionLevel.AUTO, False
+        return PermissionLevel.ASK, False
 
     async def execute(self, action: str = "", text: str = "", task_id: int = 0, status: str = "", **_) -> str:
         store = get_store()

@@ -3,6 +3,8 @@
 import os
 
 from src.types import Tool
+from src.permissions.types import PermissionLevel
+from src.permissions.path_check import is_within_project, is_sensitive_file
 
 
 MAX_LINES = 500          # hard cap: never return more than this
@@ -54,6 +56,14 @@ class FileReadTool(Tool):
     @property
     def is_concurrent_safe(self) -> bool:
         return True  # read-only
+
+    def check_permission(self, file_path: str = "", **_) -> tuple[PermissionLevel, bool]:
+        """Read: AUTO within project, ASK outside, DENY for sensitive files."""
+        if is_sensitive_file(file_path):
+            return PermissionLevel.DENY, False
+        if not is_within_project(file_path, os.getcwd()):
+            return PermissionLevel.ASK, False
+        return PermissionLevel.AUTO, False
 
     async def execute(self, file_path: str = "", offset: int = 0, limit: int = DEFAULT_LIMIT, **_) -> str:
         if not file_path:

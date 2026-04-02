@@ -4,6 +4,7 @@ import asyncio
 import os
 
 from src.types import Tool
+from src.permissions.types import PermissionLevel
 
 
 # Default blacklist: commands that should never run without explicit override
@@ -79,6 +80,15 @@ class BashTool(Tool):
     def is_dangerous(self, command: str) -> bool:
         """Check if command matches dangerous patterns (needs user confirmation)."""
         return any(p in command for p in DANGEROUS_PATTERNS)
+
+    def check_permission(self, command: str = "", **_) -> tuple[PermissionLevel, bool]:
+        """Bash permission: blacklisted → DENY, dangerous → ASK, safe → ASK.
+        Bash is never AUTO because any command can modify state."""
+        if self._check_blacklist(command):
+            return PermissionLevel.DENY, True  # bypass-immune
+        if self.is_dangerous(command):
+            return PermissionLevel.DENY, False
+        return PermissionLevel.ASK, False
 
     async def execute(self, command: str = "", **_) -> str:
         if not command.strip():

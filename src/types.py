@@ -4,6 +4,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
 
+from src.permissions.types import PermissionLevel
+
 
 # ============================================================
 # Message Types
@@ -60,6 +62,21 @@ class Tool(ABC):
     async def execute(self, **params) -> str:
         """Run the tool's business logic. Returns result as string."""
         ...
+
+    def check_permission(self, **params) -> tuple[PermissionLevel, bool]:
+        """Determine permission level for this specific invocation.
+
+        Returns:
+            (level, bypass_immune) where:
+            - level: AUTO / ASK / DENY based on the operation
+            - bypass_immune: if True, even yolo mode won't skip the check
+
+        Override in subclasses for tool-specific logic.
+        Default: ASK for write tools, AUTO for read-only tools.
+        """
+        if self.is_concurrent_safe:
+            return PermissionLevel.AUTO, False
+        return PermissionLevel.ASK, False
 
     def render(self, result: str) -> str:
         """Format tool output for user display.

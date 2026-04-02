@@ -1,5 +1,6 @@
 """Real Agent 101 - Main entry point."""
 
+import argparse
 import asyncio
 import json
 import os
@@ -17,6 +18,8 @@ from src.tools.edit import FileEditTool
 from src.tools.todo import TodoTool, init_store
 from src.context.compact import needs_compaction, compact_messages
 from src.types import CompactConfig
+from src.permissions.types import PermissionLevel, PermissionMode
+from src.permissions.checker import check_permission, prompt_user
 
 load_dotenv()
 
@@ -44,50 +47,43 @@ def build_registry() -> ToolRegistry:
     return registry
 
 
-def ask_permission(tool_name: str, params: dict) -> bool:
-    """Blocking permission check: ask user y/n before executing a tool.
-    Returns True if approved, False if rejected."""
-    console.print(f"\n[bold yellow]Tool:[/bold yellow] {tool_name}")
-    for k, v in params.items():
-        display = str(v)
-        if len(display) > 200:
-            display = display[:200] + "..."
-        console.print(f"  {k}: {display}")
-
-    while True:
-        answer = console.input("[bold yellow]Allow? (y/n):[/bold yellow] ").strip().lower()
-        if answer in ("y", "yes"):
-            return True
-        if answer in ("n", "no"):
-            return False
+def parse_args() -> argparse.Namespace:
+    """Parse CLI arguments. --mode sets the global permission mode."""
+    parser = argparse.ArgumentParser(description="Real Agent 101")
+    parser.add_argument(
+        "--mode",
+        choices=["normal", "auto", "yolo"],
+        default="normal",
+        help="Permission mode: normal (default), auto, yolo",
+    )
+    return parser.parse_args()
 
 
 # ============================================================
 # Agent Loop
 # ============================================================
 
-async def agent_loop():
-    """The core agent loop: input → API → output → repeat.
+async def agent_loop(permission_mode: PermissionMode):
+    """The core agent loop with three-tier permission system.
 
-    Flow:
-        while True:
-            1. Read user input
-            2. Append to messages
-            3. Check compaction (BEFORE calling API)
-            4. Call API (streaming)
-            5. Collect response: text + tool_calls
-            6. Append assistant message to history
-            7. If finish_reason is "tool_calls":
-               - For each tool call: check permission → execute → collect result
-               - Append tool results to messages
-               - Continue loop (go back to step 3, no new user input)
-            8. If finish_reason is "stop": back to 1
+    Permission flow per tool call:
+        1. tool.check_permission(**params) → (level, bypass_immune)
+        2. check_permission(level, mode, bypass_immune) → final_level
+        3. AUTO → execute immediately
+           ASK  → prompt user y/n
+           DENY → return REJECTED to model
     """
 
     messages: list[dict] = []
     registry = build_registry()
 
-    console.print("[bold green]Real Agent 101[/bold green] — type 'quit' to exit\n")
+    mode_label = {
+        PermissionMode.NORMAL: "normal",
+        PermissionMode.AUTO: "auto",
+        PermissionMode.YOLO: "[bold red]yolo[/bold red]",
+    }[permission_mode]
+
+    console.print(f"[bold green]Real Agent 101[/bold green] — mode: {mode_label} — type 'quit' to exit\n")
 
     while True:
         # ── 1. User input ──
@@ -106,7 +102,7 @@ async def agent_loop():
 
         messages.append({"role": "user", "content": user_input})
 
-        # ── Inner loop: keeps running while model requests tool_calls ──
+        # ── Inner loop: tool execution chain ──
         while True:
             # ── 2. Check compaction ──
             if needs_compaction(messages, compact_config):
@@ -135,13 +131,11 @@ async def agent_loop():
                     choice = choices[0]
                     delta = choice.get("delta", {})
 
-                    # Stream text
                     if delta.get("content"):
                         text = delta["content"]
                         print(text, end="", flush=True)
                         assistant_text += text
 
-                    # Collect tool_calls
                     if delta.get("tool_calls"):
                         for tc in delta["tool_calls"]:
                             idx = tc["index"]
@@ -166,7 +160,7 @@ async def agent_loop():
                 messages.pop()
                 break
 
-            print()  # newline after streaming
+            print()
 
             # ── 4. Append assistant message ──
             assistant_msg = {"role": "assistant", "content": assistant_text or None}
@@ -174,7 +168,7 @@ async def agent_loop():
                 assistant_msg["tool_calls"] = tool_calls
             messages.append(assistant_msg)
 
-            # ── 5. Handle tool_calls ──
+            # ── 5. Handle tool_calls with permission system ──
             if finish_reason == "tool_calls" and tool_calls:
                 for tc in tool_calls:
                     func_name = tc["function"]["name"]
@@ -183,61 +177,74 @@ async def agent_loop():
                     except json.JSONDecodeError:
                         func_args = {}
 
-                    # Permission check
                     tool = registry.get(func_name)
-                    needs_permission = True
+                    if not tool:
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc["id"],
+                            "content": f"Error: unknown tool '{func_name}'",
+                        })
+                        continue
 
-                    # Read-only tools don't need confirmation
-                    if tool and tool.is_concurrent_safe:
-                        needs_permission = False
+                    # ── Permission check (3 steps) ──
 
-                    # Dangerous bash commands always need confirmation
-                    if func_name == "bash" and hasattr(tool, "is_dangerous"):
-                        if tool.is_dangerous(func_args.get("command", "")):
-                            needs_permission = True
+                    # Step 1: Tool declares its own permission level
+                    tool_level, bypass_immune = tool.check_permission(**func_args)
 
-                    if needs_permission:
-                        approved = ask_permission(func_name, func_args)
+                    # Step 2: Apply global mode
+                    final_level = check_permission(
+                        func_name, tool_level, permission_mode, bypass_immune
+                    )
+
+                    # Step 3: Act on the final level
+                    if final_level == PermissionLevel.DENY:
+                        console.print(f"[bold red]Denied:[/bold red] {func_name}")
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc["id"],
+                            "content": f"DENIED: '{func_name}' is not allowed with these parameters. This operation requires explicit user request.",
+                        })
+                        continue
+
+                    if final_level == PermissionLevel.ASK:
+                        approved = prompt_user(func_name, func_args)
                         if not approved:
-                            # User rejected — tell the model explicitly
                             messages.append({
                                 "role": "tool",
                                 "tool_call_id": tc["id"],
-                                "content": f"REJECTED: User denied execution of '{func_name}'. Do not retry this exact command. Ask the user what they'd like to do instead.",
+                                "content": f"REJECTED: User denied execution of '{func_name}'. Do not retry. Ask the user what they'd like instead.",
                             })
                             continue
 
-                    # Execute tool
+                    # final_level == AUTO or user approved → execute
                     console.print(f"[dim]Running {func_name}...[/dim]")
                     result = await registry.dispatch(func_name, func_args)
 
-                    # Render for user display
                     if tool:
                         console.print(tool.render(result))
 
-                    # Append tool result to messages
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc["id"],
                         "content": result,
                     })
 
-                # Tool results appended — continue inner loop to let model process them
                 continue
 
-            # ── 6. No tool_calls: model is done, break inner loop ──
             break
 
 
 def main():
+    args = parse_args()
+
     if not API_KEY:
         console.print("[bold red]Error:[/bold red] Set OPENAI_API_KEY in .env or environment")
         sys.exit(1)
 
-    # Initialize todo persistence
+    permission_mode = PermissionMode(args.mode)
     init_store(".agent/todo.json")
 
-    asyncio.run(agent_loop())
+    asyncio.run(agent_loop(permission_mode))
 
 
 if __name__ == "__main__":
