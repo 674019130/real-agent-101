@@ -98,18 +98,4 @@ class Tool(ABC):
         }
 
 
-# ============================================================
-# Compact Config
-# ============================================================
-
-@dataclass
-class CompactConfig:
-    """Configuration for context compaction."""
-    model: str = "gpt-4o"
-    max_context_percentage: float = 0.8       # trigger at 80%
-    max_context_tokens: int = 128_000         # model's context window
-    summary_max_tokens: int = 4_000           # max tokens for the summary output
-
-    @property
-    def trigger_threshold(self) -> int:
-        return int(self.max_context_tokens * self.max_context_percentage)
+# CompactConfig is now in src/context/compact.py

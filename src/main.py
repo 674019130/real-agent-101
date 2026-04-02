@@ -16,8 +16,12 @@ from src.tools.read import FileReadTool
 from src.tools.write import FileWriteTool
 from src.tools.edit import FileEditTool
 from src.tools.todo import TodoTool, init_store
-from src.context.compact import needs_compaction, compact_messages
-from src.types import CompactConfig
+from src.context.compact import (
+    CompactConfig, CompactState, get_state,
+    needs_compaction, run_compaction,
+    layer1_time_based_microcompact,
+)
+from src.context.persistence import get_context_dir_description
 from src.permissions.types import PermissionLevel, PermissionMode
 from src.permissions.checker import check_permission, prompt_user
 
@@ -31,9 +35,13 @@ console = Console()
 
 API_KEY = os.getenv("OPENAI_API_KEY", "")
 MODEL = "gpt-4o"
-SYSTEM_PROMPT = "You are a helpful coding assistant. Be concise and direct."
-
 compact_config = CompactConfig(model=MODEL)
+
+# System prompt includes context persistence paths
+SYSTEM_PROMPT = (
+    "You are a helpful coding assistant. Be concise and direct.\n\n"
+    f"# Context Persistence\n{get_context_dir_description()}"
+)
 
 
 def build_registry() -> ToolRegistry:
@@ -76,6 +84,7 @@ async def agent_loop(permission_mode: PermissionMode):
 
     messages: list[dict] = []
     registry = build_registry()
+    compact_state = get_state()
 
     mode_label = {
         PermissionMode.NORMAL: "normal",
@@ -104,10 +113,17 @@ async def agent_loop(permission_mode: PermissionMode):
 
         # ── Inner loop: tool execution chain ──
         while True:
-            # ── 2. Check compaction ──
+            # ── 2. Pre-step: time-based microcompact (Layer 1) ──
+            messages, _ = layer1_time_based_microcompact(
+                messages, compact_config, compact_state
+            )
+
+            # ── 3. Check if full compaction needed (Layers 2-4) ──
             if needs_compaction(messages, compact_config):
                 console.print("[dim]Compacting context...[/dim]")
-                messages = await compact_messages(messages, compact_config, API_KEY)
+                messages = await run_compaction(
+                    messages, compact_config, API_KEY, compact_state
+                )
 
             # ── 3. Call API with streaming ──
             assistant_text = ""
@@ -162,11 +178,12 @@ async def agent_loop(permission_mode: PermissionMode):
 
             print()
 
-            # ── 4. Append assistant message ──
+            # ── 5. Append assistant message ──
             assistant_msg = {"role": "assistant", "content": assistant_text or None}
             if tool_calls:
                 assistant_msg["tool_calls"] = tool_calls
             messages.append(assistant_msg)
+            compact_state.record_assistant_message()
 
             # ── 5. Handle tool_calls with permission system ──
             if finish_reason == "tool_calls" and tool_calls:
@@ -228,6 +245,7 @@ async def agent_loop(permission_mode: PermissionMode):
                         "tool_call_id": tc["id"],
                         "content": result,
                     })
+                    compact_state.record_tool_result()
 
                 continue
 
