@@ -69,6 +69,22 @@ real-agent-101/
 
 关键概念：1,252 行 = Claude Code 的 0.24% / 双层 while 循环 / 内层循环是 agent 的心脏
 
+### L05: 权限系统 — 从 y/n 到分级控制
+
+三级权限（AUTO / ASK / DENY）+ 路径边界检查 + bypass-immune + 全局模式（normal/auto/yolo）。
+
+关键概念：Tool.check_permission() 每个工具自己声明权限 / 可逆性决定 ASK vs DENY / bypass-immune 即使 yolo 也拦不住
+
+延伸讨论：Glob 规则、AI 自动审批（Yolo Classifier）、Hook 扩展点、Prompt Engineering 的两种类型（能力补偿 vs 策略定义）
+
+### L06: 上下文压缩优化 — 五层压缩策略
+
+5 层从轻到重：时间微压缩 → 缓存微压缩 → Session Memory → 全量压缩 → API 原生。压缩前持久化到磁盘，system prompt 声明路径让模型用 Read 工具访问。
+
+关键概念：KV Cache 过期时清理是零成本 / cache_edits 服务端删除不破坏缓存 / Session Memory 零 API 调用压缩 / 不加新工具，只加信息
+
+专题讨论：Mid-Stream Tool Execution（源码验证）— content_block_stop 时执行，非 concurrent_safe 阻塞队列保证顺序
+
 ## 课程网站
 
 交互式课程网站，包含源码走读、时序图、对比表、流程图、Agent 结构图、思考题（隐藏答案 + LLM 评分）。
