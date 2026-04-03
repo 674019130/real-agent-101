@@ -1,4 +1,13 @@
-"""Tool registry: register, lookup, and dispatch tools."""
+"""Tool registry: register, lookup, and dispatch tools.
+
+Design choice: NO input validation against JSON Schema.
+We trust the model's output — the API already constrains it via the schema,
+and if params are wrong, execute() will naturally return an actionable error.
+Adding jsonschema validation would be redundant and could reject valid calls
+when schemas aren't perfectly permissive.
+
+Claude Code takes the same approach: no client-side schema validation.
+"""
 
 from src.types import Tool
 
@@ -19,7 +28,7 @@ class ToolRegistry:
 
     async def dispatch(self, name: str, params: dict) -> str:
         """Execute a tool by name with given parameters.
-        Returns the result string, or an error message."""
+        Trust the model — if params are wrong, execute() handles it."""
         tool = self.get(name)
         if tool is None:
             return f"Error: unknown tool '{name}'"
@@ -29,7 +38,7 @@ class ToolRegistry:
             return f"Error executing {name}: {e}"
 
     def get_api_schemas(self) -> list[dict]:
-        """Get all tool definitions in Anthropic API format."""
+        """Get all tool definitions in OpenAI API format."""
         return [tool.to_api_schema() for tool in self._tools.values()]
 
     def __len__(self) -> int:

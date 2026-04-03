@@ -23,7 +23,9 @@ from src.context.compact import (
     layer1_time_based_microcompact,
 )
 from src.context.persistence import get_context_dir_description
+from src.environment import get_environment_prompt
 from src.permissions.types import PermissionMode
+from src.tools.subagent import SubAgentTool
 
 load_dotenv()
 
@@ -37,21 +39,32 @@ API_KEY = os.getenv("OPENAI_API_KEY", "")
 MODEL = "gpt-4o"
 compact_config = CompactConfig(model=MODEL)
 
-# System prompt includes context persistence paths
+# System prompt: assembled from components
 SYSTEM_PROMPT = (
     "You are a helpful coding assistant. Be concise and direct.\n\n"
+    f"{get_environment_prompt()}\n\n"
     f"# Context Persistence\n{get_context_dir_description()}"
 )
 
 
 def build_registry() -> ToolRegistry:
-    """Register all available tools."""
+    """Register all available tools including sub-agent."""
     registry = ToolRegistry()
     registry.register(BashTool())
     registry.register(FileReadTool())
     registry.register(FileWriteTool())
     registry.register(FileEditTool())
     registry.register(TodoTool())
+
+    # Sub-agent: inherits all tools above, configured after registry is built
+    sub_agent = SubAgentTool()
+    sub_agent.configure(registry, {
+        "api_key": API_KEY,
+        "model": MODEL,
+        "system": SYSTEM_PROMPT,
+    })
+    registry.register(sub_agent)
+
     return registry
 
 
