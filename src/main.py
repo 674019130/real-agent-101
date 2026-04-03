@@ -11,6 +11,7 @@ from rich.console import Console
 
 from src.api import stream_response
 from src.tools.registry import ToolRegistry
+from src.tools.executor import StreamingToolExecutor
 from src.tools.bash import BashTool
 from src.tools.read import FileReadTool
 from src.tools.write import FileWriteTool
@@ -22,8 +23,7 @@ from src.context.compact import (
     layer1_time_based_microcompact,
 )
 from src.context.persistence import get_context_dir_description
-from src.permissions.types import PermissionLevel, PermissionMode
-from src.permissions.checker import check_permission, prompt_user
+from src.permissions.types import PermissionMode
 
 load_dotenv()
 
@@ -125,10 +125,12 @@ async def agent_loop(permission_mode: PermissionMode):
                     messages, compact_config, API_KEY, compact_state
                 )
 
-            # ── 3. Call API with streaming ──
+            # ── 4. Call API with streaming + mid-stream tool execution ──
             assistant_text = ""
-            tool_calls = []
+            tool_calls = []         # accumulator for SSE chunks
+            submitted = set()       # indices already submitted to executor
             finish_reason = None
+            executor = StreamingToolExecutor(registry, permission_mode)
 
             console.print("[bold magenta]Assistant:[/bold magenta] ", end="")
 
@@ -147,11 +149,13 @@ async def agent_loop(permission_mode: PermissionMode):
                     choice = choices[0]
                     delta = choice.get("delta", {})
 
+                    # Stream text
                     if delta.get("content"):
                         text = delta["content"]
                         print(text, end="", flush=True)
                         assistant_text += text
 
+                    # Accumulate tool_calls chunk by chunk
                     if delta.get("tool_calls"):
                         for tc in delta["tool_calls"]:
                             idx = tc["index"]
@@ -168,6 +172,18 @@ async def agent_loop(permission_mode: PermissionMode):
                             if tc.get("function", {}).get("arguments"):
                                 tool_calls[idx]["function"]["arguments"] += tc["function"]["arguments"]
 
+                        # ── Mid-stream execution trigger ──
+                        # When a new index appears, the previous one is complete.
+                        # Submit it to the executor immediately.
+                        for i in range(len(tool_calls) - 1):
+                            if i not in submitted and tool_calls[i]["id"]:
+                                executor.add_tool(
+                                    i, tool_calls[i]["id"],
+                                    tool_calls[i]["function"]["name"],
+                                    tool_calls[i]["function"]["arguments"],
+                                )
+                                submitted.add(i)
+
                     if choice.get("finish_reason"):
                         finish_reason = choice["finish_reason"]
 
@@ -178,6 +194,17 @@ async def agent_loop(permission_mode: PermissionMode):
 
             print()
 
+            # Submit the last tool_call (wasn't caught mid-stream)
+            if finish_reason == "tool_calls":
+                for i in range(len(tool_calls)):
+                    if i not in submitted and tool_calls[i]["id"]:
+                        executor.add_tool(
+                            i, tool_calls[i]["id"],
+                            tool_calls[i]["function"]["name"],
+                            tool_calls[i]["function"]["arguments"],
+                        )
+                        submitted.add(i)
+
             # ── 5. Append assistant message ──
             assistant_msg = {"role": "assistant", "content": assistant_text or None}
             if tool_calls:
@@ -185,65 +212,15 @@ async def agent_loop(permission_mode: PermissionMode):
             messages.append(assistant_msg)
             compact_state.record_assistant_message()
 
-            # ── 5. Handle tool_calls with permission system ──
+            # ── 6. Wait for all tool executions, collect results in order ──
             if finish_reason == "tool_calls" and tool_calls:
-                for tc in tool_calls:
-                    func_name = tc["function"]["name"]
-                    try:
-                        func_args = json.loads(tc["function"]["arguments"]) if tc["function"]["arguments"] else {}
-                    except json.JSONDecodeError:
-                        func_args = {}
+                results = await executor.wait_all()
 
-                    tool = registry.get(func_name)
-                    if not tool:
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tc["id"],
-                            "content": f"Error: unknown tool '{func_name}'",
-                        })
-                        continue
-
-                    # ── Permission check (3 steps) ──
-
-                    # Step 1: Tool declares its own permission level
-                    tool_level, bypass_immune = tool.check_permission(**func_args)
-
-                    # Step 2: Apply global mode
-                    final_level = check_permission(
-                        func_name, tool_level, permission_mode, bypass_immune
-                    )
-
-                    # Step 3: Act on the final level
-                    if final_level == PermissionLevel.DENY:
-                        console.print(f"[bold red]Denied:[/bold red] {func_name}")
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tc["id"],
-                            "content": f"DENIED: '{func_name}' is not allowed with these parameters. This operation requires explicit user request.",
-                        })
-                        continue
-
-                    if final_level == PermissionLevel.ASK:
-                        approved = prompt_user(func_name, func_args)
-                        if not approved:
-                            messages.append({
-                                "role": "tool",
-                                "tool_call_id": tc["id"],
-                                "content": f"REJECTED: User denied execution of '{func_name}'. Do not retry. Ask the user what they'd like instead.",
-                            })
-                            continue
-
-                    # final_level == AUTO or user approved → execute
-                    console.print(f"[dim]Running {func_name}...[/dim]")
-                    result = await registry.dispatch(func_name, func_args)
-
-                    if tool:
-                        console.print(tool.render(result))
-
+                for tool_call_id, result_content in results:
                     messages.append({
                         "role": "tool",
-                        "tool_call_id": tc["id"],
-                        "content": result,
+                        "tool_call_id": tool_call_id,
+                        "content": result_content,
                     })
                     compact_state.record_tool_result()
 
