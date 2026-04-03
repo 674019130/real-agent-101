@@ -85,6 +85,14 @@ real-agent-101/
 
 专题讨论：Mid-Stream Tool Execution（源码验证）— content_block_stop 时执行，非 concurrent_safe 阻塞队列保证顺序
 
+### L07: 并发工具执行 — StreamingToolExecutor
+
+队列式执行器，SSE 流中 tool_call 完整即提交执行。concurrent_safe 工具并行，非安全工具阻塞队列串行。
+
+生产特性：bash 错误级联（终止排队的写操作，只读不受影响）、统一超时（bash 30s / 其他 120s）、progress 回调
+
+关键发现：is_concurrent_safe 有三重作用——权限标记（L05）、调度标记（并行/串行）、级联标记（是否受 cascade 影响）
+
 ## 课程网站
 
 交互式课程网站，包含源码走读、时序图、对比表、流程图、Agent 结构图、思考题（隐藏答案 + LLM 评分）。
