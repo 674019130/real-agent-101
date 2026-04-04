@@ -113,3 +113,43 @@ def get_environment_prompt() -> str:
     lines.append(f"- Agent version: {info['agent_version']}")
 
     return "\n".join(lines)
+
+
+def get_git_status_snapshot() -> str:
+    """获取 Git 仓库的启动时快照。
+
+    CC 在对话开始时注入一段 gitStatus，包含：
+      - 当前 branch
+      - git status（工作区变更）
+      - 最近 5 条 commit
+
+    标注为 "snapshot in time" — 告诉模型这是启动时的状态，
+    对话过程中如果 agent 执行了 git 操作，这个快照不会更新。
+    模型需要自己通过 bash 工具获取最新状态。
+
+    返回: 格式化的 git 快照文本，空字符串如果不在 git 仓库里
+    """
+    # 先确认是否在 git 仓库里
+    branch = _run_git(["rev-parse", "--abbrev-ref", "HEAD"])
+    if not branch:
+        return ""
+
+    lines = [
+        "# Git Status (snapshot at conversation start, will not auto-update)",
+        f"Current branch: {branch}",
+    ]
+
+    # git status --short: 简洁的工作区变更列表
+    # 不用 -uall（CC 也不用 — 大仓库会很慢）
+    status = _run_git(["status", "--short"])
+    if status:
+        lines.append(f"\nChanges:\n{status}")
+    else:
+        lines.append("\nWorking tree: clean")
+
+    # 最近 5 条 commit（给模型上下文：最近在做什么）
+    log = _run_git(["log", "--oneline", "-5"])
+    if log:
+        lines.append(f"\nRecent commits:\n{log}")
+
+    return "\n".join(lines)

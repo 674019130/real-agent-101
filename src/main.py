@@ -2,7 +2,6 @@
 
 import argparse
 import asyncio
-import json
 import os
 import sys
 
@@ -22,16 +21,15 @@ from src.context.compact import (
     needs_compaction, run_compaction,
     layer1_time_based_microcompact,
 )
-from src.context.persistence import get_context_dir_description
-from src.environment import get_environment_prompt
 from src.permissions.types import PermissionMode
 from src.tools.subagent import SubAgentTool
 from src.tools.skill import SkillTool
+from src.tools.web_search import WebSearchTool
 from src.skills.loader import (
     scan_skills, scan_commands,
-    get_skills_prompt, get_commands_prompt,
     load_command_body,
 )
+from src.prompt.system import build_system_prompt, build_system_reminder
 
 load_dotenv()
 
@@ -50,40 +48,47 @@ _skills = scan_skills()
 _commands = scan_commands()
 _command_map = {cmd.name: cmd for cmd in _commands}
 
-# System prompt: assembled from all components
-# This is built ONCE at startup and never changes (KV cache friendly)
-SYSTEM_PROMPT = "\n\n".join(filter(None, [
-    "You are a helpful coding assistant. Be concise and direct.",
-    get_environment_prompt(),
-    f"# Context Persistence\n{get_context_dir_description()}",
-    get_skills_prompt(_skills),
-    get_commands_prompt(_commands),
-]))
 
+def build_registry_and_prompt() -> tuple[ToolRegistry, str]:
+    """Register all tools, then build system prompt (needs registry for tool guide).
 
-def build_registry() -> ToolRegistry:
-    """Register all available tools including sub-agent."""
+    为什么 registry 和 system prompt 一起构建:
+        tool_guide 需要 registry 来生成工具特定的使用指南。
+        所以 registry 必须先建好，system prompt 才能组装。
+        Sub-agent 也需要 system prompt，所以顺序是：
+            registry (sans sub-agent) → system prompt → sub-agent → done
+    """
     registry = ToolRegistry()
     registry.register(BashTool())
     registry.register(FileReadTool())
     registry.register(FileWriteTool())
     registry.register(FileEditTool())
     registry.register(TodoTool())
+    registry.register(WebSearchTool())
 
     # Skill tool: model can load skill content on demand (Layer 2)
     if _skills:
         registry.register(SkillTool(_skills))
 
-    # Sub-agent: inherits all tools above, configured after registry is built
+    # Build system prompt AFTER registry is ready (tool guide needs tool list)
+    # Built ONCE at startup, never changes (KV cache friendly)
+    system_prompt = build_system_prompt(
+        registry=registry,
+        model=MODEL,
+        skills=_skills,
+        commands=_commands,
+    )
+
+    # Sub-agent: inherits all tools above, gets the assembled system prompt
     sub_agent = SubAgentTool()
     sub_agent.configure(registry, {
         "api_key": API_KEY,
         "model": MODEL,
-        "system": SYSTEM_PROMPT,
+        "system": system_prompt,
     })
     registry.register(sub_agent)
 
-    return registry
+    return registry, system_prompt
 
 
 def parse_args() -> argparse.Namespace:
@@ -114,7 +119,7 @@ async def agent_loop(permission_mode: PermissionMode):
     """
 
     messages: list[dict] = []
-    registry = build_registry()
+    registry, system_prompt = build_registry_and_prompt()
     compact_state = get_state()
 
     mode_label = {
@@ -150,7 +155,13 @@ async def agent_loop(permission_mode: PermissionMode):
                 user_input = body
             # If not a known command, pass through as regular input
 
-        messages.append({"role": "user", "content": user_input})
+        # ── System-reminder injection ──
+        # 动态信息（日期等）不放 system prompt（避免 KV cache 失效），
+        # 而是作为 <system-reminder> 标签追加到 user message 里。
+        # 模型认识这个标签，知道是系统元信息而非用户指令。
+        reminder = build_system_reminder()
+        user_content = f"{user_input}\n{reminder}" if reminder else user_input
+        messages.append({"role": "user", "content": user_content})
 
         # ── Inner loop: tool execution chain ──
         while True:
@@ -179,7 +190,7 @@ async def agent_loop(permission_mode: PermissionMode):
                 async for chunk in stream_response(
                     api_key=API_KEY,
                     model=MODEL,
-                    system=SYSTEM_PROMPT,
+                    system=system_prompt,
                     messages=messages,
                     tools=registry.get_api_schemas() or None,
                 ):

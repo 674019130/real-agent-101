@@ -37,6 +37,10 @@ class ToolRegistry:
         except Exception as e:
             return f"Error executing {name}: {e}"
 
+    def get_all_tools(self) -> list[Tool]:
+        """Return all registered tools (for tool guide generation)."""
+        return list(self._tools.values())
+
     def get_api_schemas(self) -> list[dict]:
         """Get all tool definitions in OpenAI API format."""
         return [tool.to_api_schema() for tool in self._tools.values()]
