@@ -5,10 +5,17 @@ export interface Question {
   hint?: string;
 }
 
+export interface CodeAnnotation {
+  lines: [number, number];  // [startLine, endLine] 1-based inclusive
+  label: string;            // short label like "返回值类型"
+  explanation: string;      // full explanation in Chinese
+}
+
 export interface ContentItem {
   text: string;
   key?: boolean;
   code?: string;
+  annotations?: CodeAnnotation[];
 }
 
 export interface SeqStep {
@@ -68,12 +75,16 @@ export interface Phase {
 
 export const phases: Phase[] = [
   { number: 1, title: "能对话 — Agent loop、流式 API、消息历史", status: "done" },
-  { number: 2, title: "定方向 — Agent 类型、运行环境、工具集设计", status: "active" },
-  { number: 3, title: "有手有眼 — 实现工具系统", status: "upcoming" },
-  { number: 4, title: "有脑子 — System prompt、上下文管理", status: "upcoming" },
-  { number: 5, title: "可信赖 — 权限、持久化、子 agent、hooks", status: "upcoming" },
+  { number: 2, title: "定方向 — Agent 类型、运行环境、工具集设计", status: "done" },
+  { number: 3, title: "有手有眼 — 实现工具系统", status: "done" },
+  { number: 4, title: "有脑子 — System prompt、上下文管理", status: "done" },
+  { number: 5, title: "可信赖 — 权限、持久化、子 agent、hooks", status: "active" },
   { number: 6, title: "能干活 — 真实项目实战 + gap analysis", status: "upcoming" },
 ];
+
+import { lessons0506 } from "./lessons-05-06";
+import { lessons0708 } from "./lessons-07-08";
+import { lessons0910 } from "./lessons-09-10";
 
 // Helper to create items quickly
 const t = (text: string, key = false, code?: string): ContentItem => ({ text, key, code });
@@ -131,7 +142,7 @@ export const lessons: Lesson[] = [
         type: "code",
         title: "源码：Tool 基类 (types.py)",
         items: [
-          t("", false, `class Tool(ABC):
+          { text: "", code: `class Tool(ABC):
     @property
     @abstractmethod
     def name(self) -> str: ...
@@ -164,7 +175,15 @@ export const lessons: Lesson[] = [
                 "description": self.description,
                 "parameters": self.input_schema,
             },
-        }`),
+        }`, annotations: [
+              { lines: [1, 1] as [number, number], label: "基类定义", explanation: "Tool 继承 ABC（抽象基类），强制子类实现所有抽象方法。不实现就报错，防止遗漏。" },
+              { lines: [2, 4] as [number, number], label: "工具名称", explanation: "name 是抽象属性，每个工具必须有唯一名称。模型通过这个名称决定调用哪个工具。" },
+              { lines: [6, 8] as [number, number], label: "工具描述", explanation: "description 给模型看，不是给人看。描述质量直接影响模型是否能正确选择工具。" },
+              { lines: [10, 14] as [number, number], label: "参数定义", explanation: "input_schema 返回 JSON Schema，告诉模型工具接受什么参数。没有它模型不知道怎么传参。" },
+              { lines: [16, 19] as [number, number], label: "并发安全标记", explanation: "默认 False（不安全）。只读工具覆盖为 True，执行器就知道可以并行跑，还影响权限判断。" },
+              { lines: [21, 22] as [number, number], label: "执行入口", explanation: "async 异步执行，**params 接收任意参数。返回字符串——所有工具输出统一为文本格式，方便塞进 messages。" },
+              { lines: [24, 34] as [number, number], label: "API 格式转换", explanation: "把工具定义转成 OpenAI API 要求的格式。这是胶水代码——工具内部用 Python 属性，对外输出 API 需要的 dict 结构。" },
+            ] },
         ],
       },
       {
@@ -181,7 +200,7 @@ export const lessons: Lesson[] = [
         title: "源码：SSE 流式解析 (api.py)",
         items: [
           t("httpx 直接调 OpenAI API，手写 SSE 解析。核心是 buffer + split — 网络 chunk 不保证按行对齐。", false),
-          t("", false, `async with client.stream("POST", API_URL, json=payload,
+          { text: "", code: `async with client.stream("POST", API_URL, json=payload,
                          headers=headers, timeout=120.0) as resp:
     resp.raise_for_status()
     buffer = ""
@@ -195,7 +214,12 @@ export const lessons: Lesson[] = [
                 if data_str == "[DONE]":
                     return  # 流结束信号
                 event = json.loads(data_str)
-                yield event  # AsyncGenerator yield`),
+                yield event  # AsyncGenerator 逐个产出事件`, annotations: [
+              { lines: [1, 3] as [number, number], label: "建立连接", explanation: "httpx 流式 POST 请求，120 秒超时。raise_for_status() 在非 2xx 时立即抛异常，不浪费时间读无效响应体。" },
+              { lines: [4, 6] as [number, number], label: "缓冲拼接", explanation: "网络 chunk 不保证按行对齐——一个 chunk 可能包含半行。buffer 累积所有文本，确保按完整行处理。" },
+              { lines: [7, 9] as [number, number], label: "逐行解析", explanation: "SSE 协议以换行分隔事件。split('\\\\n', 1) 每次只取一行，剩余留在 buffer 等下次拼接。" },
+              { lines: [10, 15] as [number, number], label: "事件分发", explanation: "data: 前缀是 SSE 标准格式。[DONE] 是 OpenAI 自定义的流结束信号，不是 JSON。正常事件 json.loads 后 yield 给调用方。" },
+            ] },
           t("data: [DONE] 是 SSE 的结束信号，不是 JSON", true),
         ],
       },
@@ -216,7 +240,7 @@ export const lessons: Lesson[] = [
         title: "源码：Agent Loop 核心结构 (main.py)",
         items: [
           t("外层 while 等用户输入，内层 while 跑工具链直到 stop", false),
-          t("", false, `async def agent_loop():
+          { text: "", code: `async def agent_loop():
     messages: list[dict] = []   # 唯一核心状态
     registry = build_registry() # 注册 5 个工具
 
@@ -246,7 +270,14 @@ export const lessons: Lesson[] = [
                     })
                 continue  # 内层循环继续
 
-            break  # finish_reason == "stop" → 等用户`),
+            break  # finish_reason == "stop" → 等用户`, annotations: [
+              { lines: [1, 3] as [number, number], label: "初始化", explanation: "messages 列表是整个 agent 的唯一核心状态。所有操作（输入、回复、工具结果、压缩）都是对它的 append 或替换。" },
+              { lines: [5, 7] as [number, number], label: "外层循环", explanation: "外层 while 等用户输入（人类节奏）。每次输入 append 为 user 消息，维持完整对话历史。" },
+              { lines: [9, 12] as [number, number], label: "压缩检查", explanation: "内层循环入口先检查上下文是否超标。检查点守在「发 API 前」——不管是用户消息还是工具结果，都在这里统一拦截。" },
+              { lines: [14, 18] as [number, number], label: "调 API", explanation: "流式调用 API 收集三路信息：文本内容、工具调用、结束原因。assistant 回复必须 append 回 messages，否则下一轮没有上下文。" },
+              { lines: [20, 29] as [number, number], label: "工具执行", explanation: "finish_reason==\"tool_calls\" 是 agent 的关键分支——模型说「我想用工具」，执行后结果以 tool 角色回传，continue 让内层循环继续。" },
+              { lines: [31, 31] as [number, number], label: "循环出口", explanation: "finish_reason==\"stop\" 时 break 回外层循环等用户。这个 break 是 chatbot 和 agent 的分界线。" },
+            ] },
         ],
       },
       {
@@ -437,7 +468,7 @@ export const lessons: Lesson[] = [
         title: "源码：Bash 工具的安全层 (bash.py)",
         items: [
           t("两层检查：硬黑名单（直接拦截）+ 危险模式（需要用户确认）", false),
-          t("", false, `# 硬黑名单：这些命令永远不执行
+          { text: "", code: `# 硬黑名单：这些命令永远不执行
 DEFAULT_BLACKLIST = [
     "rm -rf /", "rm -rf /*",
     "mkfs", "dd if=",
@@ -465,7 +496,13 @@ async def execute(self, command: str = "", **_) -> str:
     )
     stdout, stderr = await asyncio.wait_for(
         proc.communicate(), timeout=30.0  # 30 秒超时
-    )`),
+    )`, annotations: [
+              { lines: [1, 6] as [number, number], label: "硬黑名单", explanation: "这些命令无条件拦截，永远不执行。包括删根目录、格式化磁盘、fork bomb 等不可逆破坏操作。" },
+              { lines: [8, 13] as [number, number], label: "危险模式", explanation: "这些命令有时确实需要（比如 sudo apt install），但风险较高。匹配到就弹确认，让用户决定。两层分级是关键设计。" },
+              { lines: [15, 15] as [number, number], label: "输出截断", explanation: "50K 字符约 12,500 token。防止一个 cat 大文件把整个上下文窗口吃满，模型就没空间思考了。" },
+              { lines: [17, 20] as [number, number], label: "黑名单检查", explanation: "执行前先过黑名单。命中直接返回 BLOCKED 字符串——不是抛异常，而是让模型知道被拦了，可以换个方式。" },
+              { lines: [22, 29] as [number, number], label: "子进程执行", explanation: "asyncio 异步子进程，不阻塞事件循环。30 秒超时防止命令挂起（比如 ping 不加 -c）。stdout/stderr 分开捕获便于格式化输出。" },
+            ] },
         ],
       },
       {
@@ -473,7 +510,7 @@ async def execute(self, command: str = "", **_) -> str:
         title: "源码：File Edit 的唯一性检查 (edit.py)",
         items: [
           t("old_string 必须在文件中恰好出现一次。0 次 → 告诉模型「重新读文件」；多次 → 告诉模型「提供更多上下文」", false),
-          t("", false, `count = content.count(old_string)
+          { text: "", code: `count = content.count(old_string)
 
 if count == 0:
     return (
@@ -489,7 +526,12 @@ if count > 1:
     )  # ← 告诉模型怎么修
 
 # 恰好一次 → 替换
-new_content = content.replace(old_string, new_string, 1)`),
+new_content = content.replace(old_string, new_string, 1)`, annotations: [
+              { lines: [1, 1] as [number, number], label: "计数匹配", explanation: "先数 old_string 出现几次。这一步决定后续三个分支走哪个——0 次、多次、恰好 1 次。" },
+              { lines: [3, 8] as [number, number], label: "未找到处理", explanation: "0 次匹配返回 actionable error：告诉模型「没找到」并附上文件预览。模型看到后会重新读文件获取最新内容，而不是盲目重试。" },
+              { lines: [10, 14] as [number, number], label: "多次匹配处理", explanation: "多次匹配说明定位不够精确。告诉模型「提供更多上下文」——比如多包含几行代码，让匹配唯一化。" },
+              { lines: [16, 17] as [number, number], label: "精确替换", explanation: "恰好一次匹配才执行替换。replace 第三个参数 1 确保只替换一次。这个设计天然幂等——第二次执行时 old_string 已经不存在了。" },
+            ] },
         ],
       },
       {
@@ -568,7 +610,7 @@ new_content = content.replace(old_string, new_string, 1)`),
         type: "code",
         title: "项目文件结构",
         items: [
-          t("", false, `real-agent-101/  (1,252 行)
+          { text: "", code: `real-agent-101/  (1,252 行)
 ├── main.py      244 行  入口 + agent loop + 权限
 ├── api.py        95 行  raw HTTP (流式 + 非流式)
 ├── types.py      98 行  Tool 基类 + CompactConfig
@@ -580,7 +622,11 @@ new_content = content.replace(old_string, new_string, 1)`),
 │   ├── write.py      63 行  写文件 (全文覆盖)
 │   └── todo.py      143 行  Todo (持久化 JSON)
 └── context/
-    └── compact.py    89 行  压缩 (80%阈值/整体压缩)`),
+    └── compact.py    89 行  压缩 (80%阈值/整体压缩)`, annotations: [
+              { lines: [1, 4] as [number, number], label: "核心三文件", explanation: "main.py 是入口和循环骨架（最大），api.py 处理网络通信，types.py 定义抽象接口。三个文件构成 agent 的「骨骼」。" },
+              { lines: [5, 11] as [number, number], label: "工具目录", explanation: "5 个工具各自独立文件，通过 registry 统一管理。bash 最大（128 行）因为安全逻辑多，write 最小（63 行）因为逻辑简单。" },
+              { lines: [12, 13] as [number, number], label: "上下文管理", explanation: "目前只有一个 compact.py（粗暴压缩）。Claude Code 同位置有 11 个文件、7 层策略——这是未来演进方向。" },
+            ] },
         ],
       },
       {
@@ -624,11 +670,11 @@ new_content = content.replace(old_string, new_string, 1)`),
         title: "源码：tool_calls 的分块到达和拼接",
         items: [
           t("OpenAI 的 tool_calls 参数是流式分块到达的 JSON 字符串。先来 {\"com，再来 mand\": \"ls\"}，必须拼完再 json.loads()。", true),
-          t("", false, `# 收集 tool_calls（streamed incrementally）
+          { text: "", code: `# 收集 tool_calls（流式增量到达）
 if delta.get("tool_calls"):
     for tc in delta["tool_calls"]:
         idx = tc["index"]
-        # Grow the list if needed
+        # 按需扩展列表
         while len(tool_calls) <= idx:
             tool_calls.append({
                 "id": "",
@@ -642,7 +688,12 @@ if delta.get("tool_calls"):
         if tc.get("function", {}).get("arguments"):
             # arguments 是分块到达的 JSON 字符串，必须累积拼接
             tool_calls[idx]["function"]["arguments"] += \\
-                tc["function"]["arguments"]`),
+                tc["function"]["arguments"]`, annotations: [
+              { lines: [1, 4] as [number, number], label: "遍历增量", explanation: "每个 SSE chunk 的 delta 可能包含多个 tool_call 的片段。index 标识是第几个工具调用，用于正确归位。" },
+              { lines: [5, 11] as [number, number], label: "按需扩展", explanation: "模型可能并行调用多个工具。index=2 到达时列表可能只有 1 个元素，所以用 while 循环扩展到足够长，填充空模板。" },
+              { lines: [12, 15] as [number, number], label: "元数据填充", explanation: "id 和 name 通常在第一个 chunk 到达。用 if 判断是因为后续 chunk 不会重复发这些字段。" },
+              { lines: [16, 19] as [number, number], label: "参数拼接", explanation: "arguments 是核心难点——JSON 字符串被切成多个 chunk（如 {\"com 和 mand\": \"ls\"}），必须用 += 累积拼接，等流结束后才能 json.loads()。" },
+            ] },
         ],
       },
       {
@@ -650,7 +701,7 @@ if delta.get("tool_calls"):
         title: "源码：权限检查 + 用户拒绝处理",
         items: [
           t("REJECTED 消息是关键——不是静默跳过，而是明确告诉模型被拒绝了", true),
-          t("", false, `# 权限判断
+          { text: "", code: `# 权限判断
 tool = registry.get(func_name)
 needs_permission = True
 
@@ -670,7 +721,12 @@ if needs_permission:
             "tool_call_id": tc["id"],
             "content": "REJECTED: User denied execution. "
                        "Do not retry. Ask user what to do."
-        })`),
+        })`, annotations: [
+              { lines: [1, 3] as [number, number], label: "默认需确认", explanation: "默认 needs_permission=True（安全优先）。后续规则只做「豁免」或「强制」，不会遗漏未覆盖的情况。" },
+              { lines: [5, 7] as [number, number], label: "只读豁免", explanation: "is_concurrent_safe==True 的工具（如 File Read、Glob）免确认。读操作不改状态，频繁弹确认只会拖慢速度。" },
+              { lines: [9, 11] as [number, number], label: "危险升级", explanation: "即使 bash 本身不是只读，普通命令可以免确认。但危险模式（sudo/rm -rf）强制升级为需确认，覆盖前面的豁免。" },
+              { lines: [13, 21] as [number, number], label: "拒绝处理", explanation: "用户拒绝后不是静默跳过，而是把 REJECTED 消息塞进 messages。模型看到后知道被拒了，会换个方案——这比忽略工具调用好得多。" },
+            ] },
         ],
       },
       {
@@ -711,6 +767,10 @@ if needs_permission:
     ],
   },
 ];
+
+// Merge all lesson modules into the exported array
+// Other files import `lessons` directly, so we push into the same array
+lessons.push(...lessons0506, ...lessons0708, ...lessons0910);
 
 export function getLessonById(id: string): Lesson | undefined {
   return lessons.find((l) => l.id === id);

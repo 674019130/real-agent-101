@@ -24,6 +24,7 @@ import QuestionCard from "@/components/lesson/QuestionCard";
 import SequenceDiagram from "@/components/lesson/SequenceDiagram";
 import CompareTable from "@/components/lesson/CompareTable";
 import FlowDiagram from "@/components/lesson/FlowDiagram";
+import CodeBlock from "@/components/lesson/CodeBlock";
 import { getLessonById, lessons, type ContentItem } from "@/data/lessons";
 
 const sectionIcons: Record<string, React.ReactNode> = {
@@ -63,16 +64,7 @@ function ContentItemView({ item, accentColor, sectionType }: {
             {item.text}
           </p>
         )}
-        <pre
-          className="rounded-lg p-4 text-[12px] leading-[1.65] overflow-x-auto font-mono"
-          style={{
-            background: "oklch(0.11 0.008 65)",
-            border: "1px solid var(--color-border-subtle)",
-            color: "var(--color-text-secondary)",
-          }}
-        >
-          <code>{item.code}</code>
-        </pre>
+        <CodeBlock code={item.code} annotations={item.annotations} />
       </div>
     );
   }

@@ -16,17 +16,27 @@ interface OrganDef {
 }
 
 const organs: OrganDef[] = [
-  { id: "brain",    label: "LLM / Brain",       labelZh: "大脑·LLM",     lesson: "l01", x: 100, y: 22,  char: "◈", size: 20 },
-  { id: "eyes",     label: "Input / Eyes",       labelZh: "眼·输入",      lesson: "l01", x: 60,  y: 52,  char: "◉" },
-  { id: "mouth",    label: "Output / Mouth",     labelZh: "嘴·输出",      lesson: "l01", x: 140, y: 52,  char: "◎" },
-  { id: "memory",   label: "Context / Memory",   labelZh: "记忆·上下文",   lesson: "l01", x: 100, y: 72,  char: "⬡", size: 16 },
-  { id: "heart",    label: "Registry / Heart",   labelZh: "心·注册表",    lesson: "l03", x: 100, y: 100, char: "♦", size: 14 },
-  { id: "hands",    label: "Tools / Hands",      labelZh: "手·工具",      lesson: "l03", x: 48,  y: 100, char: "⚙" },
-  { id: "hands2",   label: "Tools / Hands",      labelZh: "手·工具",      lesson: "l03", x: 152, y: 100, char: "⚙" },
-  { id: "skeleton", label: "Loop / Skeleton",    labelZh: "骨架·循环",    lesson: "l04", x: 100, y: 130, char: "∞", size: 16 },
-  { id: "legs",     label: "Environment / Legs", labelZh: "腿·环境",      lesson: "l02", x: 72,  y: 158, char: "▽" },
-  { id: "legs2",    label: "Environment / Legs", labelZh: "腿·环境",      lesson: "l02", x: 128, y: 158, char: "▽" },
-  { id: "shield",   label: "Permissions",        labelZh: "盾·权限",      lesson: "",    x: 100, y: 46,  char: "⛊", size: 12 },
+  // L01: Agent loop, streaming, messages
+  { id: "brain",    label: "LLM / Brain",       labelZh: "大脑·LLM",      lesson: "l01", x: 100, y: 22,  char: "◈", size: 20 },
+  { id: "eyes",     label: "Input / Eyes",       labelZh: "眼·输入",       lesson: "l01", x: 60,  y: 52,  char: "◉" },
+  { id: "mouth",    label: "Output / Mouth",     labelZh: "嘴·输出",       lesson: "l01", x: 140, y: 52,  char: "◎" },
+  // L06: Context compression (was L01 memory, now also L06)
+  { id: "memory",   label: "Context / Memory",   labelZh: "记忆·压缩",     lesson: "l06", x: 100, y: 72,  char: "⬡", size: 16 },
+  // L03: Tool registry + L09: Skill system
+  { id: "heart",    label: "Registry / Heart",   labelZh: "心·注册表",     lesson: "l03", x: 100, y: 100, char: "♦", size: 14 },
+  { id: "hands",    label: "Tools / Hands",      labelZh: "手·工具",       lesson: "l03", x: 48,  y: 100, char: "⚙" },
+  { id: "hands2",   label: "Tools / Hands",      labelZh: "手·工具",       lesson: "l03", x: 152, y: 100, char: "⚙" },
+  // L04: Agent loop / L07: Concurrent executor
+  { id: "skeleton", label: "Loop / Skeleton",    labelZh: "骨架·执行器",    lesson: "l07", x: 100, y: 130, char: "∞", size: 16 },
+  // L02: Environment / L08: Environment + hooks + sub-agent
+  { id: "legs",     label: "Environment / Legs", labelZh: "腿·环境",       lesson: "l08", x: 72,  y: 158, char: "▽" },
+  { id: "legs2",    label: "Environment / Legs", labelZh: "腿·环境",       lesson: "l08", x: 128, y: 158, char: "▽" },
+  // L05: Permission system
+  { id: "shield",   label: "Permissions",        labelZh: "盾·权限",       lesson: "l05", x: 100, y: 46,  char: "⛊", size: 12 },
+  // L09: Skill & Command (progressive disclosure)
+  { id: "skill",    label: "Skills / Knowledge", labelZh: "技·披露",       lesson: "l09", x: 28,  y: 130, char: "◇", size: 12 },
+  // L10: System Prompt integration
+  { id: "prompt",   label: "System Prompt",      labelZh: "魂·提示词",     lesson: "l10", x: 172, y: 130, char: "✧", size: 12 },
 ];
 
 const connections: [number, number, number, number][] = [
@@ -39,13 +49,21 @@ const connections: [number, number, number, number][] = [
   [100, 108, 100, 122], // heart → skeleton
   [90, 136, 76, 152],   // skeleton → left leg
   [110, 136, 124, 152], // skeleton → right leg
+  [90, 130, 38, 130],   // skeleton → skill
+  [110, 130, 162, 130], // skeleton → prompt
 ];
 
 const lessonColors: Record<string, string> = {
-  l01: "#3B82F6",
-  l02: "#10B981",
-  l03: "#8B5CF6",
-  l04: "#F59E0B",
+  l01: "#3B82F6",  // blue
+  l02: "#10B981",  // green
+  l03: "#8B5CF6",  // purple
+  l04: "#F59E0B",  // amber
+  l05: "#8B5CF6",  // purple (permissions)
+  l06: "#F59E0B",  // amber (compression)
+  l07: "#10B981",  // green (executor)
+  l08: "#8B5CF6",  // purple (ecosystem)
+  l09: "#F59E0B",  // amber (skill)
+  l10: "#F59E0B",  // amber (system prompt)
 };
 
 export default function AgentAnatomy() {
