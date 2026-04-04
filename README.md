@@ -38,9 +38,9 @@ real-agent-101/
 |-------|------|------|
 | 1 | **能对话** — Agent loop、流式 API、消息历史、压缩骨架 | ✅ |
 | 2 | **定方向** — Agent 类型选型、运行环境分析、工具集设计 | ✅ |
-| 3 | **有手有眼** — 实现工具系统（Bash、文件读写、搜索） | |
-| 4 | **有脑子** — System prompt 工程、上下文管理 | |
-| 5 | **可信赖** — 权限、持久化、子 agent、hooks | |
+| 3 | **有手有眼** — 实现工具系统（Bash、文件读写、搜索） | ✅ |
+| 4 | **有脑子** — System prompt 工程、上下文管理 | ✅ |
+| 5 | **可信赖** — 权限、持久化、子 agent、hooks | ✅ |
 | 6 | **能干活** — 真实项目实战 + gap analysis | |
 
 ## 课程记录
@@ -92,6 +92,26 @@ real-agent-101/
 生产特性：bash 错误级联（终止排队的写操作，只读不受影响）、统一超时（bash 30s / 其他 120s）、progress 回调
 
 关键发现：is_concurrent_safe 有三重作用——权限标记（L05）、调度标记（并行/串行）、级联标记（是否受 cascade 影响）
+
+### L08: 错误恢复与生态扩展 — retry / hooks / sub-agent
+
+API 层指数退避重试（1/2/4s，max 3），只重试 5xx/timeout/connection，4xx 不重试。环境信息收集（静态缓存 + 动态每次重取）。Hook 系统（PreToolUse/PostToolUse/Notification，JSON stdin/stdout，5s 超时，fail-open，可改参数和输出）。Sub-agent 工具继承父工具（除自身）、独立上下文、max_turns 限制。
+
+关键概念：去掉 jsonschema 校验（信任模型，和 CC 一致）/ Hook 的价值在集成深度而非允许/拒绝 / Sub-agent 隔离上下文防污染
+
+### L09: Skill & Command — 渐进式披露
+
+Skill 系统扫描 `.agent/skills/*.md`，Layer 1 把 name+description 注入 system prompt（~50 tokens/skill），Layer 2 模型按需 call Skill tool 加载完整内容（~2K tokens）。Command 系统 `.agent/commands/*.md`，用户 `/name` 触发，模板展开成 user message（无渐进披露，用户触发即加载）。
+
+关键概念：40x token 节省 / enum schema 约束 skill 名称 / YAML front matter 零依赖解析 / Skill 是"能力"、Command 是"模板"
+
+### L10: System Prompt 集成 — 9 组件组装
+
+build_system_prompt() 在启动时组装 9 个组件：角色/工具指南/环境/模型/持久化路径/git 快照/CLAUDE.md/Skills/Commands。一次组装永不变（KV cache 友好）。动态信息（日期）通过 `<system-reminder>` 每轮注入到 user message，避免缓存失效。
+
+新增 CLAUDE.md loader（用户全局 trusted + 项目级标注 untrusted）、tool guide（策略定义型 prompt，防止 bash 代替一切）、git status snapshot、Tavily web_search 工具。
+
+关键概念：静态/动态分离 / primacy effect（角色在最前） / 来源标注让模型判断指令可信度 / 策略定义型 vs 能力补偿型 prompt
 
 ## 课程网站
 
