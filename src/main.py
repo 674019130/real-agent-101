@@ -26,6 +26,12 @@ from src.context.persistence import get_context_dir_description
 from src.environment import get_environment_prompt
 from src.permissions.types import PermissionMode
 from src.tools.subagent import SubAgentTool
+from src.tools.skill import SkillTool
+from src.skills.loader import (
+    scan_skills, scan_commands,
+    get_skills_prompt, get_commands_prompt,
+    load_command_body,
+)
 
 load_dotenv()
 
@@ -39,12 +45,20 @@ API_KEY = os.getenv("OPENAI_API_KEY", "")
 MODEL = "gpt-4o"
 compact_config = CompactConfig(model=MODEL)
 
-# System prompt: assembled from components
-SYSTEM_PROMPT = (
-    "You are a helpful coding assistant. Be concise and direct.\n\n"
-    f"{get_environment_prompt()}\n\n"
-    f"# Context Persistence\n{get_context_dir_description()}"
-)
+# ── Scan skills and commands at startup ──
+_skills = scan_skills()
+_commands = scan_commands()
+_command_map = {cmd.name: cmd for cmd in _commands}
+
+# System prompt: assembled from all components
+# This is built ONCE at startup and never changes (KV cache friendly)
+SYSTEM_PROMPT = "\n\n".join(filter(None, [
+    "You are a helpful coding assistant. Be concise and direct.",
+    get_environment_prompt(),
+    f"# Context Persistence\n{get_context_dir_description()}",
+    get_skills_prompt(_skills),
+    get_commands_prompt(_commands),
+]))
 
 
 def build_registry() -> ToolRegistry:
@@ -55,6 +69,10 @@ def build_registry() -> ToolRegistry:
     registry.register(FileWriteTool())
     registry.register(FileEditTool())
     registry.register(TodoTool())
+
+    # Skill tool: model can load skill content on demand (Layer 2)
+    if _skills:
+        registry.register(SkillTool(_skills))
 
     # Sub-agent: inherits all tools above, configured after registry is built
     sub_agent = SubAgentTool()
@@ -121,6 +139,16 @@ async def agent_loop(permission_mode: PermissionMode):
 
         if not user_input.strip():
             continue
+
+        # ── Command expansion: /xxx → expand template as user message ──
+        if user_input.strip().startswith("/"):
+            cmd_name = user_input.strip()[1:].split()[0]
+            cmd = _command_map.get(cmd_name)
+            if cmd:
+                body = load_command_body(cmd)
+                console.print(f"[dim]Expanding command: /{cmd_name}[/dim]")
+                user_input = body
+            # If not a known command, pass through as regular input
 
         messages.append({"role": "user", "content": user_input})
 
